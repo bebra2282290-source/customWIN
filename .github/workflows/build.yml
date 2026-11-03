@@ -29,6 +29,34 @@ jobs:
       - name: Publish standalone (ничего ставить не нужно)
         run: dotnet publish src/CustomWin/CustomWin.csproj -c Release -r win-x64 --self-contained true -p:PublishSingleFile=true -p:EnableCompressionInSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true -o publish/standalone
 
+      - name: Smoke test (exe запускается и не падает)
+        shell: pwsh
+        run: |
+          $failed = $false
+          foreach ($exe in @('publish/lite/CustomWin.exe', 'publish/standalone/CustomWin.exe')) {
+            foreach ($mode in @('', '--tray')) {
+              $argList = @(); if ($mode) { $argList = @($mode) }
+              $p = Start-Process -FilePath $exe -ArgumentList $argList -PassThru
+              Start-Sleep -Seconds 10
+              if ($p.HasExited) {
+                Write-Host "::error::$exe $mode exited after start with code $($p.ExitCode)"
+                $failed = $true
+              } else {
+                Write-Host "$exe $mode is running (working set $([math]::Round($p.WorkingSet64 / 1MB, 1)) MB)"
+                Stop-Process -Id $p.Id -Force
+                Start-Sleep -Seconds 2
+              }
+            }
+          }
+          if ($failed) {
+            Get-WinEvent -FilterHashtable @{ LogName = 'Application'; StartTime = (Get-Date).AddMinutes(-5) } -ErrorAction SilentlyContinue |
+              Where-Object { $_.ProviderName -in @('.NET Runtime', 'Application Error') } |
+              Select-Object -First 4 | ForEach-Object { Write-Host "----- $($_.ProviderName)"; Write-Host $_.Message }
+            $log = Join-Path $env:APPDATA 'CustomWin/error.log'
+            if (Test-Path $log) { Get-Content $log }
+            exit 1
+          }
+
       - uses: actions/upload-artifact@v4
         with:
           name: CustomWin-lite-win-x64
