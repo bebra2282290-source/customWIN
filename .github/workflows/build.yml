@@ -35,8 +35,8 @@ jobs:
           $failed = $false
           foreach ($exe in @('publish/lite/CustomWin.exe', 'publish/standalone/CustomWin.exe')) {
             foreach ($mode in @('', '--tray')) {
-              $argList = @(); if ($mode) { $argList = @($mode) }
-              $p = Start-Process -FilePath $exe -ArgumentList $argList -PassThru
+              if ($mode) { $p = Start-Process -FilePath $exe -ArgumentList $mode -PassThru }
+              else { $p = Start-Process -FilePath $exe -PassThru }
               Start-Sleep -Seconds 10
               if ($p.HasExited) {
                 Write-Host "::error::$exe $mode exited after start with code $($p.ExitCode)"
@@ -48,11 +48,16 @@ jobs:
               }
             }
           }
+          # Ошибка запуска показывается окном и пишется в error.log — окно не даёт процессу выйти, поэтому проверяем лог
+          $log = Join-Path $env:APPDATA 'CustomWin/error.log'
+          if (Test-Path $log) {
+            Write-Host "::error::error.log was written during the smoke test"
+            $failed = $true
+          }
           if ($failed) {
             Get-WinEvent -FilterHashtable @{ LogName = 'Application'; StartTime = (Get-Date).AddMinutes(-5) } -ErrorAction SilentlyContinue |
               Where-Object { $_.ProviderName -in @('.NET Runtime', 'Application Error') } |
               Select-Object -First 4 | ForEach-Object { Write-Host "----- $($_.ProviderName)"; Write-Host $_.Message }
-            $log = Join-Path $env:APPDATA 'CustomWin/error.log'
             if (Test-Path $log) { Get-Content $log }
             exit 1
           }
